@@ -1,14 +1,15 @@
 import cv2
-from tensorflow.keras.preprocessing.image import img_to_array
-import os
-import numpy as np
+from simple_facerec import SimpleFacerec
 from tensorflow.keras.models import model_from_json
-from scipy.spatial import distance as dist
+import numpy as np
 
-root_dir = os.getcwd()
+# Encode faces from a folder
+sfr = SimpleFacerec()
+sfr.load_encoding_images("C:\\Users\\Anandini\\Downloads\\images")
 
+# Load Camera
+cap = cv2.VideoCapture(0)
 face_cascade = cv2.CascadeClassifier("Face_Antispoofing_System\\models\\haarcascade_frontalface_default.xml")
-
 json_file = open("Face_Antispoofing_System\\antispoofing_models\\antispoofing_model.json", 'r')
 loaded_model_json = json_file.read()
 json_file.close()
@@ -18,21 +19,6 @@ print("Model loaded from disk")
 
 video = cv2.VideoCapture(0)
 
-# Load registered face embeddings and labels from "images" folder
-images_folder = "C:\\Users\\Anandini\\Downloads\\images"
-registered_faces = {}
-
-for image_name in os.listdir(images_folder):
-    image_path = os.path.join(images_folder, image_name)
-    if os.path.isfile(image_path):
-        image = cv2.imread(image_path)
-        resized_image = cv2.resize(image, (160, 160))
-        resized_image = resized_image.astype("float") / 255.0
-        resized_image = np.expand_dims(resized_image, axis=0)
-
-        image_label = image_name.split(".")[0]
-        registered_faces[image_label] = model.predict(resized_image)[0]
-
 while True:
     try:
         ret, frame = video.read()
@@ -41,7 +27,7 @@ while True:
         resized_frame = cv2.resize(frame, (0, 0), fx=0.5, fy=0.5)
         gray = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2GRAY)
 
-        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minSize=(30, 30))
+        faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minSize=(30, 30), flags=cv2.CASCADE_SCALE_IMAGE)
         if len(faces) > 0:
             # Select the face with the largest area
             (x, y, w, h) = max(faces, key=lambda f: f[2] * f[3])
@@ -61,33 +47,38 @@ while True:
                 cv2.putText(frame, label, (x, y - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
                 cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)
+    
             else:
-                matched_label = None
-                min_distance = float('inf')
+                # Detect Faces
+                face_locations, face_names = sfr.detect_known_faces(frame)
 
-                for label, registered_face in registered_faces.items():
-                    d = dist.euclidean(resized_face.flatten(), registered_face.flatten())
+                if len(face_locations) > 0:
+                    # Calculate distance from the camera for each detected face
+                    distances = [sum(face_loc) for face_loc in face_locations]
 
-                    if d < min_distance:
-                        min_distance = d
-                        matched_label = label
+                    # Find the index of the closest face
+                    closest_index = distances.index(min(distances))
 
-                if matched_label and min_distance < 0.5:  # Adjust the threshold here
-                    # Print the matched label (name) above the face
-                    cv2.putText(frame, matched_label, (x, y - 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                else:
-                    cv2.putText(frame, 'unregistered', (x, y - 10),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    # Retrieve the closest face location and name
+                    closest_face_loc = face_locations[closest_index]
+                    closest_face_name = face_names[closest_index]
 
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+                    # Draw bounding box and display name for the closest face
+                    y1, x2, y2, x1 = closest_face_loc
+                    cv2.putText(frame, closest_face_name, (x1, y1 - 10), cv2.FONT_HERSHEY_DUPLEX, 1, (0, 0, 200), 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 200), 4)
 
-        cv2.imshow('frame', frame)
+        cv2.imshow("Frame", frame)
+
         key = cv2.waitKey(1)
-        if key == ord('q'):
+        if key == 27:
             break
+    
     except Exception as e:
         pass
 
-video.release()
+cap.release()
 cv2.destroyAllWindows()
+
+
+
